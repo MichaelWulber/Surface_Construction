@@ -1,6 +1,7 @@
 #include <imebra/imebra.h>
 #include <iostream>
 #include <vector>
+#include <string>
 
 #define GLEW_STATIC
 #include <Gl/glew.h>
@@ -23,11 +24,17 @@ bool isInsideTorus(GLfloat x, GLfloat y, GLfloat z, GLfloat R, GLfloat a);
 GLfloat torusImplicitFunction(GLfloat x, GLfloat y, GLfloat z, GLfloat R, GLfloat a);
 std::vector<GLfloat> genTorusMesh();
 
+std::vector<GLfloat> genCTMesh(std::vector<std::vector<std::vector<int>>> frames, double aspect_ratio);
+GLfloat CTinterpolate(GLfloat a, GLfloat b);
+std::vector<GLfloat> findVerticesCT(int i, int j, int k, int index, GLfloat* vertex[3]);
+
 int edgeListIndex(const bool arr[8]);
 std::vector<GLfloat> findVertices(int i, int j, int k, int index, GLfloat* vertex[3], GLfloat*** vals);
 GLfloat interpolate(GLfloat a, GLfloat aVal, GLfloat b, GLfloat bVal);
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
+
+std::string getFilePath(int index);
 
 const GLint WIDTH = 1200, HEIGHT = 1200;
 int screenWidth, screenHeight;
@@ -35,6 +42,7 @@ int screenWidth, screenHeight;
 // Mesh Objects
 Mesh sphere;
 Mesh torus;
+Mesh ct;
 Mesh current;
 
 int main() {
@@ -83,64 +91,71 @@ int main() {
 
 	// create torus mesh
 	std::vector<GLfloat> torusVertices = genTorusMesh();
-	torus = Mesh(0.1f, 0.3f, 0.8f, 0.9f, 0.9f, 1.0f);
+	torus = Mesh(0.95f, 0.52f, 0.16f);
 	torus.setVPositions(torusVertices);
+	torus.genVNormals();
 	torus.genBuffer();
 
 	// create sphere mesh
 	std::vector<GLfloat> sphereVertices = genSphereMesh();
-	sphere = Mesh(0.1f, 0.3f, 0.8f, 0.9f, 0.9f, 1.0f);
+	sphere = Mesh(0.95f, 0.52f, 0.16f);
 	sphere.setVPositions(sphereVertices);
+	sphere.genVNormals();
 	sphere.genBuffer();
 
 	// --- create mesh from DICOM ---
+	std::cout << "reading DICOM...  ";
 
-	// FOR EACH FILE:
-	// Load DICOM file
-	std::unique_ptr<imebra::DataSet> loadedDataSet(imebra::CodecFactory::load("C:\\Users\\wulbe_000\\Desktop\\alligator_head\\test.dcm"));
+	const int dimX = 16;
+	const int dimY = 16;
+	const int numFrames = 16;
+	float frame_scale = 729/numFrames;
+	int start = 0;
 
-	// Get Image
-	std::unique_ptr<imebra::Image> image(loadedDataSet->getImageApplyModalityTransform(0));
+	std::vector<std::vector<std::vector<int>>> frames(numFrames, std::vector<std::vector<int>>(dimX, std::vector<int>(dimY, 0)));
+	for (int index = 1; index <= numFrames; ++index) {
+		// Load DICOM file
+		std::unique_ptr<imebra::DataSet> loadedDataSet(imebra::CodecFactory::load( getFilePath(index * frame_scale + start) ));
 
-	// Get dicom data
-	double slice_thickness = loadedDataSet->getDouble(imebra::TagId(imebra::tagId_t::SliceThickness_0018_0050), 0, -1);
+		// Get Image
+		std::unique_ptr<imebra::Image> image(loadedDataSet->getImageApplyModalityTransform(0));
 
-	// Get the color space
-	std::string colorSpace = image->getColorSpace();
-	int width = image->getWidth();
-	int height = image->getHeight();
+		// Get color space
+		std::string colorSpace = image->getColorSpace();
+		int width = image->getWidth();
+		int height = image->getHeight();
 
-	// Retrieve the data handler
-	std::unique_ptr<imebra::ReadingDataHandlerNumeric> dataHandler(image->getReadingDataHandler());
+		// Retrieve data handler
+		std::unique_ptr<imebra::ReadingDataHandlerNumeric> dataHandler(image->getReadingDataHandler());
 
-	std::cout << "width: " << width << std::endl;
-	std::cout << "height: " << width << std::endl;
+		// Obtain Threshold Frame
+		float x_factor = (float)width / (float)dimX;
+		float y_factor = (float)height / (float)dimY;
+		for (int i = 0; i < width; ++i) {
+			for (int j = 0; j < height; ++j) {
+				// For monochrome images
 
-	//// Obtain Threshold Frame
-	std::vector<std::vector<int> > frame(width, std::vector<int>(height, 0));
-	for (int i = 0; i < width; ++i) {
-		for (int j = 0; j < height; ++j) {
-			// For monochrome images
-			std::int32_t luminance = dataHandler->getSignedLong(j * width + i);
+				std::int32_t luminance = dataHandler->getSignedLong(j * width + i);
 
-			if (luminance > 100 && luminance <= 300) {
-				frame[i][j] = 1;
+				if (luminance > 100 && luminance < 900) {
+					frames[index - 1][i / x_factor][j / y_factor] = 1;
+				}
 			}
 		}
+		
+		std::cout << index << std::endl;
 	}
-
-	// print frame values
-	for (int i = width/2; i < width/2 + width/10; ++i) {
-		for (int j = height/2; j < height/2 + height/10; ++j) {
-			std::cout << frame[i][j] << " ";
-		}
-		std::cout << std::endl;
-	}
-
+	std::cout << "finished" << std::endl;
 	// --- end ---
 
+	std::vector<GLfloat> CTVertices = genCTMesh(frames, 1.25);
+	ct = Mesh(0.95f, 0.52f, 0.16f);
+	ct.setVPositions(CTVertices);
+	ct.genVNormals();
+	ct.genBuffer();
+
 	// set current mesh
-	current = torus;
+	current = ct;
 
 	// create openGL buffer and attribute objects
 	GLuint VBO, VAO;
@@ -158,14 +173,14 @@ int main() {
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
 
-		glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+		glClearColor(0.0f, 0.3f, 0.8f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		ourShader.use();
 
 		// set up MVP matrix
 		glm::mat4 model(1.0f);
-		model = glm::rotate(model, (GLfloat)glfwGetTime() * -1.0f, glm::vec3(1.0f, 1.0f, 0.0f));
+		model = glm::rotate(model, (GLfloat)glfwGetTime() * -0.75f, glm::vec3(0.0f, 0.3f, 1.0f));
 		glm::mat4 view = glm::lookAt(
 			glm::vec3(3, 3, 3), // Camera is at (3,3,3), in World Space
 			glm::vec3(0, 0, 0), // and looks at the origin
@@ -175,6 +190,9 @@ int main() {
 
 		GLint MVPLoc = glGetUniformLocation(ourShader.Program, "MVP");
 		glUniformMatrix4fv(MVPLoc, 1, GL_FALSE, glm::value_ptr(MVP));
+
+		GLint modelLoc = glGetUniformLocation(ourShader.Program, "model");
+		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
 
 		glBindVertexArray(VAO);
 		glDrawArrays(GL_TRIANGLES, 0, current.vPositions.size() / 3);
@@ -214,7 +232,7 @@ std::vector<GLfloat> genSphereMesh() {
 
 	isovalue = 0.5f;
 
-	const GLint dim = 5; // number of vertices on bounding box edge
+	const GLint dim = 25; // number of vertices on bounding box edge
 	bool vertices[dim][dim][dim];
 
 
@@ -502,7 +520,7 @@ std::vector<GLfloat> genTorusMesh() {
 	bool byteArray[8];
 
 	const GLfloat r1 = 0.5f;
-	const GLfloat r2 = 0.1f;
+	const GLfloat r2 = 0.3f;
 
 	const GLint dim = 50; // number of vertices on bounding box edge
 	bool vertices[dim][dim][dim];
@@ -585,4 +603,256 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 		current = torus;
 		current.bindBuffer();
 	}
+
+	else if (key == GLFW_KEY_A && action == GLFW_PRESS) {
+		current = ct;
+		current.bindBuffer();
+	}
+}
+
+std::string getFilePath(int index) {
+	std::string path = ".\\alligator_skull\\WitmerLab_VisInt-Alligator_OUVC10606_head_";
+	std::string type = ".dcm";
+
+	if (index < 10) {
+		return path + "00" + std::to_string(index) + type;
+	} 
+
+	else if (index < 100) {
+		return path + "0" + std::to_string(index) + type;
+	}
+
+	else {
+		return path + std::to_string(index) + type;
+	}
+}
+
+std::vector<GLfloat> genCTMesh(std::vector<std::vector<std::vector<int>>> vertices, double aspect_ratio) {
+	std::cout << "generating mesh..." << std::endl;
+	GLfloat minX = -1.0f * aspect_ratio;
+	GLfloat minY = -1.0f;
+	GLfloat minZ = -1.0f;
+	GLfloat maxX = 1.0f * aspect_ratio;
+	GLfloat maxY = 1.0f;
+	GLfloat maxZ = 1.0f;
+	GLfloat x, y, z, a;
+	bool byteArray[8];
+
+	const GLint dimX = vertices.size();
+	const GLint dimY = vertices[0].size();
+	const GLint dimZ = vertices[0][0].size();
+
+	GLfloat* vertexCoord[3] = { new GLfloat[dimX], new GLfloat[dimY], new GLfloat[dimZ] };
+	for (GLint i = 0; i < dimX; ++i) {
+		a = ((GLfloat)i / ((GLfloat)dimX - 1));
+		x = maxX * a + minX * (1.0f - a);
+		vertexCoord[0][i] = x;
+	}
+
+	for (GLint i = 0; i < dimY; ++i) {
+		a = ((GLfloat)i / ((GLfloat)dimX - 1));
+		y = maxY * a + minY * (1.0f - a);
+		vertexCoord[1][i] = y;
+	}
+
+	for (GLint i = 0; i < dimZ; ++i) {
+		a = ((GLfloat)i / ((GLfloat)dimX - 1));
+		z = maxZ * a + minZ * (1.0f - a);
+		vertexCoord[2][i] = z;
+	}
+
+	// Go through every cube and check vertices;
+	// triangleVertices stores vertices of facets as {x0, y0, z0, x1, y1, z1, ..., xn, yn, zn}
+	std::vector<GLfloat> triangleVertices;
+	std::vector<GLfloat> temp;
+	for (GLint i = 0; i < dimX - 1; ++i) {
+		for (GLint j = 0; j < dimY - 1; ++j) {
+			for (GLint k = 0; k < dimZ - 1; ++k) {
+				byteArray[0] = vertices[i][j][k];
+				byteArray[1] = vertices[i + 1][j][k];
+				byteArray[2] = vertices[i + 1][j][k + 1];
+				byteArray[3] = vertices[i][j][k + 1];
+				byteArray[4] = vertices[i][j + 1][k];
+				byteArray[5] = vertices[i + 1][j + 1][k];
+				byteArray[6] = vertices[i + 1][j + 1][k + 1];
+				byteArray[7] = vertices[i][j + 1][k + 1];
+				int index = edgeListIndex(byteArray);
+
+				temp = findVerticesCT(i, j, k, index, vertexCoord);
+				triangleVertices.insert(triangleVertices.end(), temp.begin(), temp.end());
+			}
+		}
+	}
+	std::cout << "mesh complete" << std::endl;
+
+	return triangleVertices;
+}
+
+GLfloat CTinterpolate(GLfloat a, GLfloat b) {
+	return (a + b) / 2;
+}
+
+std::vector<GLfloat> findVerticesCT(int i, int j, int k, int index,GLfloat* vertex[3]) {
+	std::vector<GLfloat> triangleVertices;
+	int edgeNum;
+	GLfloat intersection;
+	GLfloat aVal, bVal;
+	GLfloat a, b;
+	GLfloat x, y, z;
+
+
+
+	for (int e = 0; e < 13; ++e) {
+		edgeNum = aCases[index][e];
+		switch (edgeNum) {
+		case -1:
+			return triangleVertices;
+		case 0:
+			y = vertex[1][j];
+			z = vertex[2][k];
+
+			a = vertex[0][i];
+			b = vertex[0][i + 1];
+			intersection = CTinterpolate(a, b);
+
+			triangleVertices.push_back(intersection);
+			triangleVertices.push_back(y);
+			triangleVertices.push_back(z);
+			break;
+		case 1:
+			x = vertex[0][i + 1];
+			y = vertex[1][j];
+
+			a = vertex[2][k];
+			b = vertex[2][k + 1];
+			intersection = CTinterpolate(a, b);
+
+			triangleVertices.push_back(x);
+			triangleVertices.push_back(y);
+			triangleVertices.push_back(intersection);
+			break;
+		case 2:
+			y = vertex[1][j];
+			z = vertex[2][k + 1];
+
+			a = vertex[0][i];
+			b = vertex[0][i + 1];
+			intersection = CTinterpolate(a, b);
+
+			triangleVertices.push_back(intersection);
+			triangleVertices.push_back(y);
+			triangleVertices.push_back(z);
+			break;
+		case 3:
+			x = vertex[0][i];
+			y = vertex[1][j];
+
+			a = vertex[2][k];
+			b = vertex[2][k + 1];
+			intersection = CTinterpolate(a, b);
+
+			triangleVertices.push_back(x);
+			triangleVertices.push_back(y);
+			triangleVertices.push_back(intersection);
+			break;
+		case 4:
+			y = vertex[1][j + 1];
+			z = vertex[2][k];
+
+			a = vertex[0][i];
+			b = vertex[0][i + 1];
+			intersection = CTinterpolate(a, b);
+
+			triangleVertices.push_back(intersection);
+			triangleVertices.push_back(y);
+			triangleVertices.push_back(z);
+			break;
+		case 5:
+			x = vertex[0][i + 1];
+			y = vertex[1][j + 1];
+
+			a = vertex[2][k];
+			b = vertex[2][k + 1];
+			intersection = CTinterpolate(a, b);
+
+			triangleVertices.push_back(x);
+			triangleVertices.push_back(y);
+			triangleVertices.push_back(intersection);
+			break;
+		case 6:
+			y = vertex[1][j + 1];
+			z = vertex[2][k + 1];
+
+			a = vertex[0][i];
+			b = vertex[0][i + 1];
+			intersection = CTinterpolate(a, b);
+
+			triangleVertices.push_back(intersection);
+			triangleVertices.push_back(y);
+			triangleVertices.push_back(z);
+			break;
+		case 7:
+			x = vertex[0][i];
+			y = vertex[1][j + 1];
+
+			a = vertex[2][k];
+			b = vertex[2][k + 1];
+			intersection = CTinterpolate(a, b);
+
+			triangleVertices.push_back(x);
+			triangleVertices.push_back(y);
+			triangleVertices.push_back(intersection);
+			break;
+		case 8:
+			x = vertex[0][i];
+			z = vertex[2][k];
+
+			a = vertex[1][j];
+			b = vertex[1][j + 1];
+			intersection = CTinterpolate(a, b);
+
+			triangleVertices.push_back(x);
+			triangleVertices.push_back(intersection);
+			triangleVertices.push_back(z);
+			break;
+		case 9:
+			x = vertex[0][i + 1];
+			z = vertex[2][k];
+
+			a = vertex[1][j];
+			b = vertex[1][j + 1];
+			intersection = CTinterpolate(a, b);
+
+			triangleVertices.push_back(x);
+			triangleVertices.push_back(intersection);
+			triangleVertices.push_back(z);
+			break;
+		case 10:
+			x = vertex[0][i + 1];
+			z = vertex[2][k + 1];
+
+			a = vertex[1][j];
+			b = vertex[1][j + 1];
+			intersection = CTinterpolate(a, b);
+
+			triangleVertices.push_back(x);
+			triangleVertices.push_back(intersection);
+			triangleVertices.push_back(z);
+			break;
+		case 11:
+			x = vertex[0][i];
+			z = vertex[2][k + 1];
+
+			a = vertex[1][j];
+			b = vertex[1][j + 1];
+			intersection = CTinterpolate(a, b);
+
+			triangleVertices.push_back(x);
+			triangleVertices.push_back(intersection);
+			triangleVertices.push_back(z);
+			break;
+		}
+	}
+
+	return triangleVertices;
 }
