@@ -16,13 +16,14 @@
 #include "LookUpTable.h"
 #include "Mesh.h"
 
-bool isInsideSphere(GLfloat x, GLfloat y, GLfloat z, GLfloat radius);
-GLfloat sphereImplicitFunction(GLfloat x, GLfloat y, GLfloat z);
-std::vector<GLfloat> genSphereMesh();
+#include "SphereFunc.h"
+#include "TorusFunc.h"
+#include "GenusFunc.h"
+#include "TrefoilFunc.h"
+#include "HyperbolicParaboloidFunc.h"
+#include "DoubleConeFunc.h"
 
-bool isInsideTorus(GLfloat x, GLfloat y, GLfloat z, GLfloat R, GLfloat a);
-GLfloat torusImplicitFunction(GLfloat x, GLfloat y, GLfloat z, GLfloat R, GLfloat a);
-std::vector<GLfloat> genTorusMesh();
+std::vector<GLfloat> genMesh(ImplicitFunc* function, GLfloat cubeSize);
 
 std::vector<GLfloat> genCTMesh(std::vector<std::vector<std::vector<int>>> frames, double aspect_ratio);
 GLfloat CTinterpolate(GLfloat a, GLfloat b);
@@ -42,8 +43,19 @@ int screenWidth, screenHeight;
 // Mesh Objects
 Mesh sphere;
 Mesh torus;
+Mesh genus;
+Mesh trefoil;
+Mesh hyperbolicParaboloid;
+Mesh doubleCones;
 Mesh ct;
 Mesh current;
+
+ImplicitFunc* sphereFunc;
+ImplicitFunc* torusFunc;
+ImplicitFunc* genusFunc;
+ImplicitFunc* trefoilFunc;
+ImplicitFunc* hyperbolicParaboloidFunc;
+ImplicitFunc* doubleConesFunc;
 
 int main() {
 	glfwInit();
@@ -90,25 +102,59 @@ int main() {
 	Shader ourShader("core.vert", "core.frag");
 
 	// create torus mesh
-	std::vector<GLfloat> torusVertices = genTorusMesh();
+	torusFunc = new TorusFunc(0.5f, 0.3f);
+	std::vector<GLfloat> torusVertices = genMesh(torusFunc, 1.0f);
 	torus = Mesh(0.95f, 0.52f, 0.16f);
 	torus.setVPositions(torusVertices);
 	torus.genVNormals();
 	torus.genBuffer();
 
 	// create sphere mesh
-	std::vector<GLfloat> sphereVertices = genSphereMesh();
+	sphereFunc = new SphereFunc(1.0f);
+	std::vector<GLfloat> sphereVertices = genMesh(sphereFunc, 1.0f);
 	sphere = Mesh(0.95f, 0.52f, 0.16f);
 	sphere.setVPositions(sphereVertices);
 	sphere.genVNormals();
 	sphere.genBuffer();
 
+	// create Genus 2 mesh
+	genusFunc = new GenusFunc();
+	std::vector<GLfloat> genusVertices = genMesh(genusFunc, 2.0f);
+	genus = Mesh(0.95f, 0.52f, 0.16f);
+	genus.setVPositions(genusVertices);
+	genus.genVNormals();
+	genus.genBuffer();
+
+	// create trefoil mesh
+	trefoilFunc = new TrefoilFunc(0.15f, 0.10f);
+	std::vector<GLfloat> trefoilVertices = genMesh(trefoilFunc, 2.0f);
+	trefoil = Mesh(0.95f, 0.52f, 0.16f);
+	trefoil.setVPositions(trefoilVertices);
+	trefoil.genVNormals();
+	trefoil.genBuffer();
+
+	// create double cones mesh
+	doubleConesFunc = new DoubleConeFunc(1.0f, 1.0f);
+	std::vector<GLfloat> doubleConesVertices = genMesh(doubleConesFunc, 1.0f);
+	doubleCones = Mesh(0.95f, 0.52f, 0.16f);
+	doubleCones.setVPositions(doubleConesVertices);
+	doubleCones.genVNormals();
+	doubleCones.genBuffer();
+
+	// create hyperbolic paraboloid  mesh
+	hyperbolicParaboloidFunc = new HyperbolicParaboloidFunc(1.0f, -0.5f);
+	std::vector<GLfloat> hyperbolicParaboloidVertices = genMesh(hyperbolicParaboloidFunc, 1.0f);
+	hyperbolicParaboloid = Mesh(0.95f, 0.52f, 0.16f);
+	hyperbolicParaboloid.setVPositions(hyperbolicParaboloidVertices);
+	hyperbolicParaboloid.genVNormals();
+	hyperbolicParaboloid.genBuffer();
+
 	// --- create mesh from DICOM ---
 	std::cout << "reading DICOM...  ";
 
-	const int dimX = 16;
-	const int dimY = 16;
-	const int numFrames = 16;
+	const int dimX = 64;
+	const int dimY = 64;
+	const int numFrames = 64;
 	float frame_scale = 729/numFrames;
 	int start = 0;
 
@@ -208,31 +254,19 @@ int main() {
 	return EXIT_SUCCESS;
 }
 
-GLfloat isovalue = 0.5f;		// In this case, isovalue = radius;
-
-
-bool isInsideSphere(GLfloat x, GLfloat y, GLfloat z, GLfloat radius) {
-	return (x * x + y * y + z * z <= radius);
-}
-
-GLfloat sphereImplicitFunction(GLfloat x, GLfloat y, GLfloat z) {
-	return (x * x + y * y + z * z);
-}
-
-std::vector<GLfloat> genSphereMesh() {
+std::vector<GLfloat> genMesh(ImplicitFunc* function, GLfloat cubeSize) {
 	std::cout << "generating mesh..." << std::endl;
-	GLfloat minX = -1.0f;
-	GLfloat minY = -1.0f;
-	GLfloat minZ = -1.0f;
-	GLfloat maxX = 1.0f;
-	GLfloat maxY = 1.0f;
-	GLfloat maxZ = 1.0f;
+	GLfloat minX = -cubeSize;
+	GLfloat minY = -cubeSize;
+	GLfloat minZ = -cubeSize;
+	GLfloat maxX = cubeSize;
+	GLfloat maxY = cubeSize;
+	GLfloat maxZ = cubeSize;
 	GLfloat x, y, z, a;
 	bool byteArray[8];
 
-	isovalue = 0.5f;
+	const GLint dim = 64;
 
-	const GLint dim = 25; // number of vertices on bounding box edge
 	bool vertices[dim][dim][dim];
 
 
@@ -262,8 +296,8 @@ std::vector<GLfloat> genSphereMesh() {
 				x = vertexCoord[0][i];
 				y = vertexCoord[1][j];
 				z = vertexCoord[2][k];
-				vertices[i][j][k] = isInsideSphere(x, y, z, isovalue);
-				vertexVals[i][j][k] = sphereImplicitFunction(x, y, z);
+				vertices[i][j][k] = function->isInside(x, y, z);
+				vertexVals[i][j][k] = function->function(x, y, z);
 			}
 		}
 	}
@@ -497,114 +531,43 @@ std::vector<GLfloat> findVertices(int i, int j, int k, int index,
 }
 
 GLfloat interpolate(GLfloat a, GLfloat aVal, GLfloat b, GLfloat bVal) {
-	return a + ((isovalue - aVal) * (b - a) / (bVal - aVal));
-}
-
-bool isInsideTorus(GLfloat x, GLfloat y, GLfloat z, GLfloat R, GLfloat a) {
-	return ((x*x + y*y + z*z + R*R - a*a) * (x*x + y*y + z*z + R*R - a*a) - 4 * R*R*(x*x + y*y) < 0);
-}
-
-GLfloat torusImplicitFunction(GLfloat x, GLfloat y, GLfloat z, GLfloat R, GLfloat a) {
-	return (x*x + y*y + z*z + R*R - a*a) * (x*x + y*y + z*z + R*R - a*a) - 4 * R*R*(x*x + y*y);
-}
-
-std::vector<GLfloat> genTorusMesh() {
-	std::cout << "generating mesh..." << std::endl;
-	GLfloat minX = -1.0f;
-	GLfloat minY = -1.0f;
-	GLfloat minZ = -1.0f;
-	GLfloat maxX = 1.0f;
-	GLfloat maxY = 1.0f;
-	GLfloat maxZ = 1.0f;
-	GLfloat x, y, z, a;
-	bool byteArray[8];
-
-	const GLfloat r1 = 0.5f;
-	const GLfloat r2 = 0.3f;
-
-	const GLint dim = 50; // number of vertices on bounding box edge
-	bool vertices[dim][dim][dim];
-
-	isovalue = 0.0f;
-
-	GLfloat* vertexCoord[3] = { new GLfloat[dim], new GLfloat[dim], new GLfloat[dim] };
-	for (GLint i = 0; i < dim; ++i) {
-		a = ((GLfloat)i / ((GLfloat)dim - 1));
-		x = maxX * a + minX * (1.0f - a);
-		y = maxY * a + minY * (1.0f - a);
-		z = maxZ * a + minZ * (1.0f - a);
-		vertexCoord[0][i] = x;
-		vertexCoord[1][i] = y;
-		vertexCoord[2][i] = z;
-	}
-
-	// vertices stores 0 or 1 depending on whether vertex is inside sphere or not
-	// vertexVals stores the actual value from the implicit function
-	GLfloat*** vertexVals = new GLfloat**[dim];
-	for (GLint i = 0; i < dim; ++i) {
-		vertexVals[i] = new GLfloat*[dim];
-
-		for (GLint j = 0; j < dim; ++j) {
-			vertexVals[i][j] = new GLfloat[dim];
-
-			for (GLint k = 0; k < dim; ++k) {
-				x = vertexCoord[0][i];
-				y = vertexCoord[1][j];
-				z = vertexCoord[2][k];
-				vertices[i][j][k] = isInsideTorus(x, y, z, r1, r2);
-				vertexVals[i][j][k] = torusImplicitFunction(x, y, z, r1, r2);
-			}
-		}
-	}
-
-	//for (int i = 0; i < dim; ++i) {
-	//	for (int j = 0; j < dim; ++j) {
-	//		std::cout << vertices[i][j][dim / 2] << " ";
-	//	}
-	//	std::cout << std::endl;
-	//}
-
-	// Go through every cube and check vertices;
-	// triangleVertices stores vertices of facets as {x0, y0, z0, x1, y1, z1, ..., xn, yn, zn}
-	std::vector<GLfloat> triangleVertices;
-	std::vector<GLfloat> temp;
-	for (GLint i = 0; i < dim - 1; ++i) {
-		for (GLint j = 0; j < dim - 1; ++j) {
-			for (GLint k = 0; k < dim - 1; ++k) {
-				byteArray[0] = vertices[i][j][k];
-				byteArray[1] = vertices[i + 1][j][k];
-				byteArray[2] = vertices[i + 1][j][k + 1];
-				byteArray[3] = vertices[i][j][k + 1];
-				byteArray[4] = vertices[i][j + 1][k];
-				byteArray[5] = vertices[i + 1][j + 1][k];
-				byteArray[6] = vertices[i + 1][j + 1][k + 1];
-				byteArray[7] = vertices[i][j + 1][k + 1];
-				int index = edgeListIndex(byteArray);
-
-				temp = findVertices(i, j, k, index, vertexCoord, vertexVals);
-				triangleVertices.insert(triangleVertices.end(), temp.begin(), temp.end());
-			}
-		}
-	}
-	std::cout << "mesh complete" << std::endl;
-
-	return triangleVertices;
+	return a + ((-aVal) * (b - a) / (bVal - aVal));
 }
 
 // handle input
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
-	if (key == GLFW_KEY_S && action == GLFW_PRESS) {
+	if (key == GLFW_KEY_1 && action == GLFW_PRESS) {
 		current = sphere;
 		current.bindBuffer();
 	}
 
-	else if (key == GLFW_KEY_T && action == GLFW_PRESS) {
+	else if (key == GLFW_KEY_2 && action == GLFW_PRESS) {
 		current = torus;
 		current.bindBuffer();
 	}
 
-	else if (key == GLFW_KEY_A && action == GLFW_PRESS) {
+	else if (key == GLFW_KEY_3 && action == GLFW_PRESS) {
+		current = genus;
+		current.bindBuffer();
+	}
+
+	else if (key == GLFW_KEY_4 && action == GLFW_PRESS) {
+		current = trefoil;
+		current.bindBuffer();
+	}
+
+	else if (key == GLFW_KEY_5 && action == GLFW_PRESS) {
+		current = hyperbolicParaboloid;
+		current.bindBuffer();
+	}
+
+	else if (key == GLFW_KEY_6 && action == GLFW_PRESS) {
+		current = doubleCones;
+		current.bindBuffer();
+	}
+
+	else if (key == GLFW_KEY_7 && action == GLFW_PRESS) {
 		current = ct;
 		current.bindBuffer();
 	}
